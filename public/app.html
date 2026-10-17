@@ -64,6 +64,13 @@
   <div class="orders" id="orders"></div>
   <div class="empty hide" id="empty"></div>
 
+  <button class="primary hide" id="stopBtn" type="button" style="margin-top:14px;background:#052e16;color:#bbf7d0"></button>
+
+  <div class="card hide" id="waitCard">
+    <p class="ok-line"><span class="dot"></span><span id="tWait"></span></p>
+    <p id="tSoundHint" class="warn hide"></p>
+  </div>
+
   <div class="card" id="addCard">
     <h2 id="tAddTitle"></h2>
     <form id="addForm">
@@ -115,11 +122,13 @@
       empty: 'No active orders yet. Type the number printed on your receipt.',
       waiting: 'Preparing…', ready: 'READY — come to the counter',
       notFound: 'Order not found. Check the number or ask the cashier.', gone: 'This order was already collected.',
-      iosTitle: 'One-time setup for iPhone',
-      ios: 'Tap Share, then “Add to Home Screen”. Open the Pager app from your home screen and tap “Enable alerts”. You only do this once. After that, every order is just typing its number.',
-      enableTitle: 'Get alerts on your phone',
-      enableHelp: 'Turn on alerts once. Then all your orders notify you automatically, even with the screen locked.',
-      enable: 'Enable alerts', subscribed: 'Alerts are on for all your orders',
+      wait: 'Waiting for your order. Keep this page open: your phone will ring and vibrate when it is ready.',
+      soundHint: 'Tap anywhere once to turn the sound on.', stop: 'Stop sound',
+      iosTitle: 'Optional: alerts when the screen is locked',
+      ios: 'On iPhone: tap Share, then “Add to Home Screen”, open Pager from your home screen and tap “Enable alerts”. One time only.',
+      enableTitle: 'Optional: alerts when the screen is locked',
+      enableHelp: 'Allow notifications once to be alerted even if you lock your phone or leave this page.',
+      enable: 'Allow notifications', subscribed: 'Lock-screen alerts are on for all your orders',
       testBtn: 'Send me a test notification',
       testOk: 'Test sent. It should appear in a few seconds. If nothing shows, check this browser’s notification settings.',
       testFail: 'The push service rejected the test:',
@@ -134,11 +143,13 @@
       empty: 'لا توجد طلبات حالياً. اكتب الرقم المطبوع على إيصالك.',
       waiting: 'جاري التجهيز…', ready: 'جاهز — تفضّل بالاستلام',
       notFound: 'لم يتم العثور على الطلب. تأكد من الرقم أو اسأل الكاشير.', gone: 'تم استلام هذا الطلب مسبقاً.',
-      iosTitle: 'إعداد لمرة واحدة للآيفون',
-      ios: 'اضغط مشاركة ثم «إضافة إلى الشاشة الرئيسية». افتح تطبيق Pager من الشاشة الرئيسية واضغط «تفعيل التنبيهات». تفعل هذا مرة واحدة فقط، وبعدها يكفي كتابة رقم الطلب.',
-      enableTitle: 'استقبل التنبيهات على جوالك',
-      enableHelp: 'فعّل التنبيهات مرة واحدة، وبعدها تصلك تنبيهات كل طلباتك تلقائياً حتى والشاشة مقفلة.',
-      enable: 'تفعيل التنبيهات', subscribed: 'التنبيهات مفعّلة لكل طلباتك',
+      wait: 'بانتظار طلبك. أبقِ هذه الصفحة مفتوحة: سيرن جوالك ويهتز عندما يجهز.',
+      soundHint: 'المس الشاشة مرة واحدة لتفعيل الصوت.', stop: 'إيقاف الصوت',
+      iosTitle: 'اختياري: تنبيه والشاشة مقفلة',
+      ios: 'على الآيفون: اضغط مشاركة ثم «إضافة إلى الشاشة الرئيسية»، افتح Pager من الشاشة الرئيسية واضغط «تفعيل التنبيهات». مرة واحدة فقط.',
+      enableTitle: 'اختياري: تنبيه والشاشة مقفلة',
+      enableHelp: 'اسمح بالإشعارات مرة واحدة ليصلك التنبيه حتى لو قفلت الجوال أو غادرت هذه الصفحة.',
+      enable: 'السماح بالإشعارات', subscribed: 'تنبيهات الشاشة المقفلة مفعّلة لكل طلباتك',
       testBtn: 'أرسل لي تنبيهاً تجريبياً',
       testOk: 'تم الإرسال. يفترض أن يظهر خلال ثوانٍ. إن لم يظهر فتحقق من إعدادات إشعارات المتصفح.',
       testFail: 'رفضت خدمة الإشعارات التنبيه التجريبي:',
@@ -180,6 +191,9 @@
     $('tSubscribed').textContent = t.subscribed;
     $('testBtn').textContent = t.testBtn;
     $('empty').textContent = t.empty;
+    $('tWait').textContent = t.wait;
+    $('tSoundHint').textContent = t.soundHint;
+    $('stopBtn').textContent = '🔇 ' + t.stop;
 
     const list = tokens.map((tk) => ({ tk, ...(orders[tk] || {}) })).filter((o) => o.orderNumber);
     list.sort((a, b) => (b.status === 'ready') - (a.status === 'ready'));
@@ -191,6 +205,10 @@
         <div class="s">${esc(o.status === 'ready' ? t.ready : t.waiting)}</div>
       </div>`).join('');
     $('empty').classList.toggle('hide', list.length > 0);
+    const soundOn = !!audioCtx && audioCtx.state === 'running';
+    $('waitCard').classList.toggle('hide', !list.some((o) => o.status === 'waiting'));
+    $('tSoundHint').classList.toggle('hide', soundOn);
+    $('stopBtn').classList.toggle('hide', !alarmTimer);
 
     $('addMsg').textContent = addMsg;
     $('addMsg').classList.toggle('hide', !addMsg);
@@ -228,19 +246,75 @@
   // ---------------------------------------------------------------- sound + vibration
   let audioCtx = null;
   function unlockAudio() {
-    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch {}
+    try {
+      if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.onstatechange = () => render(); }
+      if (audioCtx.state === 'suspended') audioCtx.resume().then(render).catch(() => {});
+    } catch {}
   }
   function beep() {
-    if (!audioCtx) return;
+    if (!audioCtx || audioCtx.state !== 'running') return;
     const now = audioCtx.currentTime;
-    [0, 0.35, 0.7].forEach((d) => {
+    // loud two-tone "pager" pattern
+    [[0, 988], [0.28, 740], [0.56, 988], [0.84, 740]].forEach(([d, f]) => {
       const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-      o.type = 'sine'; o.frequency.value = 880;
-      g.gain.setValueAtTime(0.0001, now + d); g.gain.exponentialRampToValueAtTime(0.4, now + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, now + d + 0.28);
-      o.connect(g).connect(audioCtx.destination); o.start(now + d); o.stop(now + d + 0.3);
+      o.type = 'square'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, now + d); g.gain.exponentialRampToValueAtTime(0.7, now + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, now + d + 0.25);
+      o.connect(g).connect(audioCtx.destination); o.start(now + d); o.stop(now + d + 0.27);
     });
   }
-  document.addEventListener('pointerdown', unlockAudio, { once: true });
+
+  // Ring + vibrate repeatedly until the customer taps "Stop sound" (max 3 minutes).
+  let alarmTimer = null, alarmStop = null;
+  function ringOnce() {
+    if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 800]);
+    beep();
+  }
+  function startAlarm() {
+    if (alarmTimer) return;
+    document.title = '🔔 ' + (T[lang].ready);
+    ringOnce();
+    alarmTimer = setInterval(ringOnce, 2400);
+    alarmStop = setTimeout(stopAlarm, 3 * 60 * 1000);
+    render();
+  }
+  function stopAlarm() {
+    clearInterval(alarmTimer); clearTimeout(alarmStop); alarmTimer = alarmStop = null;
+    if (navigator.vibrate) navigator.vibrate(0);
+    document.title = 'Order Pager';
+    render();
+  }
+  $('stopBtn').onclick = stopAlarm;
+
+  // Keep the screen on and the page alive while waiting, so the alert is not missed.
+  let wake = null;
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator && !document.hidden && !wake) {
+        wake = await navigator.wakeLock.request('screen');
+        wake.addEventListener('release', () => { wake = null; });
+      }
+    } catch {}
+  }
+  // A silent looping sound stops the phone from freezing this page in the background (Android and iPhone).
+  let keepAudio = null;
+  function startKeepAlive() {
+    if (keepAudio) return;
+    try {
+      const n = 8000, buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
+      const w = (o, s) => [...s].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+      w(0, 'RIFF'); dv.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true);
+      dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true);
+      dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, 'data'); dv.setUint32(40, n, true); buf.fill(128, 44);
+      const a = new Audio(URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
+      a.loop = true; a.volume = 0.01;
+      keepAudio = a;
+      a.play().catch(() => { keepAudio = null; });
+    } catch {}
+  }
+  // Browsers only allow sound after one touch on the page. The first touch anywhere turns everything on.
+  function onFirstGesture() { unlockAudio(); startKeepAlive(); keepAwake(); }
+  ['pointerdown', 'touchend', 'keydown', 'click'].forEach((ev) => document.addEventListener(ev, onFirstGesture, { once: true }));
+  unlockAudio(); // works without a touch on browsers that already trust the site
 
   // ---------------------------------------------------------------- orders
   function saveTokens() { LS.set('pager-tokens', tokens); }
@@ -253,19 +327,38 @@
   // Re-attach this phone's subscription to every order it follows (called after enabling alerts / new order).
   async function linkAll() { if (!sub) return; for (const tk of [...tokens]) { try { await link({ token: tk }); } catch {} } }
 
+  function dropToken(tk) {
+    tokens = tokens.filter((x) => x !== tk); delete orders[tk];
+    if (live[tk]) { live[tk].close(); delete live[tk]; }
+  }
+  function applyUpdate(tk, d) {
+    if (d.status === 'collected') dropToken(tk);
+    else {
+      orders[tk] = d;
+      const key = `${tk}:${d.readyAt}`;   // a new readyAt (e.g. staff pressed "Push again") rings again
+      if (d.status === 'ready' && !alerted.has(key)) { alerted.add(key); startAlarm(); }
+    }
+    if (!Object.values(orders).some((o) => o.status === 'ready')) stopAlarm();
+    saveTokens();
+    render();
+  }
+
+  // Instant updates over a live connection (server-sent events), with polling below as a safety net.
+  const live = {};
+  function connectLive(tk) {
+    if (live[tk] || !('EventSource' in window)) return;
+    const es = new EventSource(`/api/track/${tk}/events`);
+    es.onmessage = (m) => { try { applyUpdate(tk, JSON.parse(m.data)); } catch {} };
+    live[tk] = es;
+  }
+
   async function refreshAll() {
     for (const tk of [...tokens]) {
+      connectLive(tk);
       try {
         const r = await fetch(`/api/track/${tk}`, { cache: 'no-store' });
-        if (r.status === 404) { tokens = tokens.filter((x) => x !== tk); delete orders[tk]; continue; }
-        const d = await r.json();
-        if (d.status === 'collected') { tokens = tokens.filter((x) => x !== tk); delete orders[tk]; continue; }
-        orders[tk] = d;
-        if (d.status === 'ready' && !alerted.has(tk)) {
-          alerted.add(tk);
-          if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 700]);
-          beep();
-        }
+        if (r.status === 404) { dropToken(tk); continue; }
+        applyUpdate(tk, await r.json());
       } catch { /* offline: next tick */ }
     }
     saveTokens();
@@ -353,7 +446,8 @@
     }
   }
   setInterval(refreshAll, 3000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAll(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); refreshAll(); } });
+  keepAwake();
   render();
   refreshAll();
 })();

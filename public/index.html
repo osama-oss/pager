@@ -109,7 +109,7 @@
       if (o.lastPush) {
         const bad = o.lastPush.failed > 0 || o.lastPush.sent === 0;
         const why = o.lastPush.details && o.lastPush.details[0] ? ` (${esc(o.lastPush.details[0].status || '')} ${esc(String(o.lastPush.details[0].message || '').slice(0, 80))})` : '';
-        push = `<div class="push ${bad ? 'bad' : ''}">Last push ${ago(o.lastPush.at)}: ${o.lastPush.sent} delivered to push service, ${o.lastPush.failed} failed${bad ? why : ''}${o.lastPush.sent === 0 && !o.lastPush.failed ? ' — no device has enabled alerts yet' : ''}</div>`;
+        push = `<div class="push ${bad ? 'bad' : ''}">Last push ${ago(o.lastPush.at)}: ${o.lastPush.sent} delivered to push service, ${o.lastPush.failed} failed${bad ? why : ''}${o.lastPush.sent === 0 && !o.lastPush.failed ? ' — no lock-screen subscriber (pages that are open are still alerted live)' : ''}</div>`;
       }
       const active = o.status !== 'collected';
       return `
@@ -117,7 +117,8 @@
         <div class="no">#${esc(o.orderNumber)}</div>
         <div class="meta">
           <span class="badge b-${o.status}">${o.status}</span>
-          <span class="${o.devices ? 'dev-on' : 'dev-off'}">${o.devices ? '● ' + o.devices + ' device' + (o.devices > 1 ? 's' : '') + ' subscribed' : '○ no device subscribed'}</span>
+          <span class="${o.viewers ? 'dev-on' : 'dev-off'}">${o.viewers ? '● ' + o.viewers + ' phone' + (o.viewers > 1 ? 's' : '') + ' watching live' : '○ page not open'}</span>
+          <span class="${o.devices ? 'dev-on' : 'dev-off'}">${o.devices ? '● ' + o.devices + ' lock-screen subscriber' + (o.devices > 1 ? 's' : '') : '○ no lock-screen push'}</span>
           <span>created ${ago(o.createdAt)}</span>
         </div>
         <div class="actions">
@@ -157,7 +158,7 @@
       if (btn.dataset.a === 'ready') {
         btn.disabled = true;
         const r = await api(`/orders/${id}/ready`, { method: 'POST' });
-        toast(r.push.sent ? `Push sent for #${o.orderNumber}` : `#${o.orderNumber} marked ready — no push delivered`);
+        toast(`#${o.orderNumber} ready: ${r.viewers} open page(s) alerted live, ${r.push.sent} lock-screen push sent`);
         await load();
       }
       if (btn.dataset.a === 'collected') { await api(`/orders/${id}/collected`, { method: 'POST' }); await load(); }

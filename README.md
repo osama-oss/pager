@@ -30,16 +30,19 @@ VAPID keys are generated on first start and stored in `data/vapid.json`. Do not 
 3. Back on the dashboard press **Ready + Push**. The notification arrives, the customer page turns green, vibrates and beeps.
 4. Add a second order. On the same phone just open the app/page and type the new order number in "Track an order". No install and no permission prompt again.
 
-## Customer experience (setup happens once per phone)
+## Customer experience: scan and wait, no setup
 
-| Phone | First order | Every next order |
-| --- | --- | --- |
-| Android (Chrome) | Scan QR, tap Enable alerts, allow | Scan QR: linked automatically, zero taps. Or type the number |
-| iPhone | Scan QR, Share > Add to Home Screen, open the app, Enable alerts | Open the Pager app, type the order number |
+1. Customer scans the QR. The page opens in the browser and just says "waiting".
+2. When staff presses **Ready + Push**, the open page instantly goes green, **rings loudly and vibrates** until the customer taps "Stop sound".
+3. Optional extra: the page offers "Allow notifications" so the alert also arrives when the phone is locked or the page is closed. Customers who ignore it lose nothing.
 
-Why iPhone needs the Home Screen step: Apple only allows web push for sites installed to the Home Screen, and a QR scan always opens Safari, which has separate storage from the installed app. So on iPhone the installed app is where new orders are typed in. This is an iOS rule that applies to every web-push pager.
+How "scan and wait" stays reliable: the page keeps the screen awake (Wake Lock), plays a silent loop so the phone does not freeze the page in the background, and receives the "ready" event over a live connection (server-sent events) with polling as a backup.
 
-If you need **zero install and zero permission on iPhone**, web push cannot do it. The alternative is sending the "ready" message by SMS or WhatsApp to the customer's phone number (needs the number at ordering and a paid provider such as Twilio or the WhatsApp Business API).
+Honest limits (browser rules, not bugs):
+- Browsers block sound and vibration until the customer touches the page once. If sound is not unlocked the page shows "Tap anywhere once to turn the sound on". The screen still flashes green either way.
+- A locked iPhone suspends web pages. The lock-screen alert on iPhone needs the Home Screen app plus the notification permission (one time per phone, the page explains it). Android Chrome needs only the permission tap.
+- If you need guaranteed alerts with zero customer action on any phone, the only option is SMS or WhatsApp to the customer's number (needs the number at ordering and a paid provider such as Twilio or the WhatsApp Business API).
+- Customers can also type an order number inside the page ("Track an order") to follow several orders or re-attach.
 
 ## Test on your phone (laptop on your Wi-Fi, e.g. 192.168.1.72)
 

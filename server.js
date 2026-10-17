@@ -100,6 +100,7 @@ const publicOrder = (o) => ({
   readyAt: o.readyAt || null,
   subscribed: o.subscriptions.length > 0,
   devices: o.subscriptions.length,
+  viewers: (sseClients.get(o.token) || new Set()).size,
   lastPush: o.lastPush || null,
 });
 // Links given to customers must work from a phone, so "localhost" is replaced by the LAN address.
@@ -115,6 +116,13 @@ function requireKey(req, res, next) {
   const key = req.get('x-api-key') || req.query.key;
   if (key !== API_KEY) return res.status(401).json({ error: 'unauthorized' });
   next();
+}
+
+// Live connection (server-sent events) so an open customer page learns "ready" instantly, no permission needed.
+const sseClients = new Map(); // token -> Set of responses
+const orderEvent = (o) => JSON.stringify({ orderNumber: o.orderNumber, status: o.status, readyAt: o.readyAt || null });
+function broadcast(o) {
+  for (const res of sseClients.get(o.token) || []) res.write(`data: ${orderEvent(o)}\n\n`);
 }
 
 async function pushToOrder(order, payload) {
@@ -179,7 +187,20 @@ app.get('/api/track/:token', (req, res) => {
   res.json({ orderNumber: o.orderNumber, status: o.status, readyAt: o.readyAt || null });
 });
 
-app.post('/api/track/:token/subscribe', (req, res) => {
+app.get('/api/track/:token/events', (req, res) => {
+  const o = db.orders.find((x) => x.token === req.params.token);
+  if (!o) return res.status(404).end();
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.flushHeaders();
+  res.write(`data: ${orderEvent(o)}\n\n`);
+  const set = sseClients.get(o.token) || new Set();
+  set.add(res);
+  sseClients.set(o.token, set);
+  const ping = setInterval(() => res.write(': ping\n\n'), 20000);
+  req.on('close', () => { clearInterval(ping); set.delete(res); });
+});
+
+app.post('/api/track/:token/subscribe',(req, res) => {
   const o = db.orders.find((x) => x.token === req.params.token);
   if (!o) return res.status(404).json({ error: 'not_found' });
   const sub = req.body && req.body.subscription;
@@ -281,6 +302,7 @@ api.post('/orders/:ref/ready', async (req, res) => {
   if (!o) return res.status(404).json({ error: 'not_found' });
   o.status = 'ready';
   o.readyAt = Date.now();
+  broadcast(o); // instant alert on pages that are open, then the push for locked phones
   const push = await pushToOrder(o, {
     title: `Order #${o.orderNumber} is ready`,
     body: 'Your order is ready for pickup.',
@@ -295,6 +317,8 @@ api.post('/orders/:ref/renotify', async (req, res) => {
   const ref = req.params.ref;
   const o = db.orders.find((x) => x.id === ref) || db.orders.find((x) => x.orderNumber === ref && x.status !== 'collected');
   if (!o) return res.status(404).json({ error: 'not_found' });
+  o.readyAt = Date.now();
+  broadcast(o);
   const push = await pushToOrder(o, {
     title: `Order #${o.orderNumber} is ready`,
     body: 'Reminder: your order is waiting for you.',
@@ -311,6 +335,7 @@ api.post('/orders/:ref/collected', (req, res) => {
   o.status = 'collected';
   o.subscriptions = [];
   save();
+  broadcast(o);
   res.json(publicOrder(o));
 });
 
