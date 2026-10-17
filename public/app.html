@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pager">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon-192.png">
+<link rel="manifest" id="manifest" href="/manifest.webmanifest">
+<script>
+  // If opened from an order QR (/p/<token>), install the per-order manifest so the first launch of the app knows that order.
+  (function () { var m = location.pathname.match(/^\/p\/([^/]+)/); if (m) document.getElementById('manifest').href = '/p/' + m[1] + '/manifest.webmanifest'; })();
+</script>
+<title>Order Pager</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
+    padding: max(60px, calc(env(safe-area-inset-top) + 50px)) 20px max(24px, env(safe-area-inset-bottom));
+    transition: background .4s;
+  }
+  body.ready { background: var(--ok); color: #052e16; animation: flash 1.1s ease-in-out infinite; }
+  @keyframes flash { 50% { background: #4ade80; } }
+  .lang { position: fixed; top: max(14px, env(safe-area-inset-top)); inset-inline-end: 14px; background: transparent; color: inherit; border: 1px solid currentColor; border-radius: 999px; padding: 6px 14px; font-size: 14px; opacity: .8; cursor: pointer; }
+  main { width: 100%; max-width: 440px; margin: 0 auto; }
+  h1 { font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 14px; text-align: center; }
+  body.ready h1 { color: #14532d; }
+  .orders { display: grid; gap: 12px; }
+  .ocard { background: var(--card); border-radius: 18px; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+  .ocard .n { font-size: 54px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .ocard .s { color: var(--accent); font-weight: 600; text-align: end; }
+  .ocard.ready { background: #052e16; }
+  .ocard.ready .s { color: #bbf7d0; font-size: 20px; }
+  .card { background: var(--card); border-radius: 16px; padding: 18px; margin-top: 18px; }
+  body.ready .card { background: rgba(5,46,22,.85); color: var(--text); }
+  .card p { margin: 0 0 12px; color: var(--muted); line-height: 1.5; }
+  .card p:last-child { margin-bottom: 0; }
+  .card h2 { font-size: 17px; margin: 0 0 8px; }
+  button.primary { width: 100%; border: 0; border-radius: 12px; padding: 15px; font-size: 17px; font-weight: 700; background: var(--accent); color: #082f49; cursor: pointer; }
+  button.primary:disabled { opacity: .5; }
+  form { display: flex; gap: 10px; }
+  form input { flex: 1; min-width: 0; background: #0f172a; border: 1px solid #334155; color: var(--text); border-radius: 12px; padding: 14px; font-size: 22px; font-weight: 700; text-align: center; }
+  form button { width: auto; padding: 0 22px; }
+  .ok-line { color: var(--ok); font-weight: 600; }
+  .warn { color: var(--warn); }
+  .hide { display: none !important; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--ok); margin-inline-end:8px; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .empty { text-align: center; color: var(--muted); padding: 22px 8px; }
+  details { margin-top: 22px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<button class="lang" id="lang" type="button">العربية</button>
+
+<main>
+  <h1 id="tTitle">Your orders</h1>
+
+  <div class="orders" id="orders"></div>
+  <div class="empty hide" id="empty"></div>
+
+  <div class="card" id="addCard">
+    <h2 id="tAddTitle"></h2>
+    <form id="addForm">
+      <input id="numIn" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="42">
+      <button class="primary" type="submit" id="addBtn"></button>
+    </form>
+    <p id="addMsg" class="warn hide" style="margin-top:12px"></p>
+  </div>
+
+  <div class="card hide" id="iosCard">
+    <h2 id="tIosTitle"></h2>
+    <p id="tIos"></p>
+  </div>
+
+  <div class="card hide" id="enableCard">
+    <h2 id="tEnableTitle"></h2>
+    <p id="tEnableHelp"></p>
+    <button class="primary" id="enableBtn" type="button"></button>
+  </div>
+
+  <div class="card hide" id="subscribedCard">
+    <p class="ok-line"><span class="dot"></span><span id="tSubscribed"></span></p>
+    <button class="primary" id="testBtn" type="button" style="font-size:15px;padding:11px"></button>
+    <p id="testResult" style="margin:12px 0 0"></p>
+  </div>
+
+  <div class="card hide" id="errCard"><p class="warn" id="errMsg"></p></div>
+
+  <details>
+    <summary>Diagnostics</summary>
+    <pre id="diag" style="white-space:pre-wrap;word-break:break-all;margin:8px 0 0"></pre>
+  </details>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  const LS = {
+    get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+
+  // ---------------------------------------------------------------- i18n
+  const T = {
+    en: {
+      dir: 'ltr', other: 'العربية', title: 'Your orders',
+      addTitle: 'Track an order', add: 'Track', addPh: 'Order number',
+      empty: 'No active orders yet. Type the number printed on your receipt.',
+      waiting: 'Preparing…', ready: 'READY — come to the counter',
+      notFound: 'Order not found. Check the number or ask the cashier.', gone: 'This order was already collected.',
+      iosTitle: 'One-time setup for iPhone',
+      ios: 'Tap Share, then “Add to Home Screen”. Open the Pager app from your home screen and tap “Enable alerts”. You only do this once. After that, every order is just typing its number.',
+      enableTitle: 'Get alerts on your phone',
+      enableHelp: 'Turn on alerts once. Then all your orders notify you automatically, even with the screen locked.',
+      enable: 'Enable alerts', subscribed: 'Alerts are on for all your orders',
+      testBtn: 'Send me a test notification',
+      testOk: 'Test sent. It should appear in a few seconds. If nothing shows, check this browser’s notification settings.',
+      testFail: 'The push service rejected the test:',
+      denied: 'Notifications are blocked. Allow them in your browser settings, or keep this page open.',
+      unsupported: 'This browser cannot receive alerts. Keep this page open, it updates automatically.',
+      insecure: 'This page is opened over plain http, so the phone blocks notifications. Open the https:// link instead.',
+      failed: 'Could not enable alerts. Please try again.',
+    },
+    ar: {
+      dir: 'rtl', other: 'English', title: 'طلباتك',
+      addTitle: 'تتبّع طلباً', add: 'تتبّع', addPh: 'رقم الطلب',
+      empty: 'لا توجد طلبات حالياً. اكتب الرقم المطبوع على إيصالك.',
+      waiting: 'جاري التجهيز…', ready: 'جاهز — تفضّل بالاستلام',
+      notFound: 'لم يتم العثور على الطلب. تأكد من الرقم أو اسأل الكاشير.', gone: 'تم استلام هذا الطلب مسبقاً.',
+      iosTitle: 'إعداد لمرة واحدة للآيفون',
+      ios: 'اضغط مشاركة ثم «إضافة إلى الشاشة الرئيسية». افتح تطبيق Pager من الشاشة الرئيسية واضغط «تفعيل التنبيهات». تفعل هذا مرة واحدة فقط، وبعدها يكفي كتابة رقم الطلب.',
+      enableTitle: 'استقبل التنبيهات على جوالك',
+      enableHelp: 'فعّل التنبيهات مرة واحدة، وبعدها تصلك تنبيهات كل طلباتك تلقائياً حتى والشاشة مقفلة.',
+      enable: 'تفعيل التنبيهات', subscribed: 'التنبيهات مفعّلة لكل طلباتك',
+      testBtn: 'أرسل لي تنبيهاً تجريبياً',
+      testOk: 'تم الإرسال. يفترض أن يظهر خلال ثوانٍ. إن لم يظهر فتحقق من إعدادات إشعارات المتصفح.',
+      testFail: 'رفضت خدمة الإشعارات التنبيه التجريبي:',
+      denied: 'الإشعارات محظورة. اسمح بها من إعدادات المتصفح، أو أبقِ هذه الصفحة مفتوحة.',
+      unsupported: 'هذا المتصفح لا يدعم التنبيهات. أبقِ هذه الصفحة مفتوحة، تتحدث تلقائياً.',
+      insecure: 'تم فتح الصفحة عبر http غير آمن، لذلك يحظر الجوال التنبيهات. افتح الرابط الذي يبدأ بـ https://.',
+      failed: 'تعذر تفعيل التنبيهات. حاول مرة أخرى.',
+    },
+  };
+  let lang = LS.get('pager-lang', null) || ((navigator.language || '').startsWith('ar') ? 'ar' : 'en');
+
+  // ---------------------------------------------------------------- state
+  let tokens = LS.get('pager-tokens', []);   // orders this phone is following
+  let orders = {};                           // token -> { orderNumber, status }
+  let sub = null;                            // this phone's push subscription (JSON)
+  let addMsg = '';
+  let pushError = null;
+  const diag = { endpoint: null, error: null };
+  const alerted = new Set();
+
+  const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = () => window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+
+  // ---------------------------------------------------------------- render
+  function render() {
+    const t = T[lang];
+    document.documentElement.lang = lang;
+    document.documentElement.dir = t.dir;
+    $('lang').textContent = t.other;
+    $('tTitle').textContent = t.title;
+    $('tAddTitle').textContent = t.addTitle;
+    $('addBtn').textContent = t.add;
+    $('numIn').placeholder = t.addPh;
+    $('tIosTitle').textContent = t.iosTitle;
+    $('tIos').textContent = t.ios;
+    $('tEnableTitle').textContent = t.enableTitle;
+    $('tEnableHelp').textContent = t.enableHelp;
+    $('enableBtn').textContent = t.enable;
+    $('tSubscribed').textContent = t.subscribed;
+    $('testBtn').textContent = t.testBtn;
+    $('empty').textContent = t.empty;
+
+    const list = tokens.map((tk) => ({ tk, ...(orders[tk] || {}) })).filter((o) => o.orderNumber);
+    list.sort((a, b) => (b.status === 'ready') - (a.status === 'ready'));
+    const anyReady = list.some((o) => o.status === 'ready');
+    document.body.classList.toggle('ready', anyReady);
+    $('orders').innerHTML = list.map((o) => `
+      <div class="ocard ${o.status === 'ready' ? 'ready' : ''}">
+        <div class="n">#${esc(o.orderNumber)}</div>
+        <div class="s">${esc(o.status === 'ready' ? t.ready : t.waiting)}</div>
+      </div>`).join('');
+    $('empty').classList.toggle('hide', list.length > 0);
+
+    $('addMsg').textContent = addMsg;
+    $('addMsg').classList.toggle('hide', !addMsg);
+
+    const secure = window.isSecureContext;
+    const supported = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    const iosInstall = secure && isIOS() && !isStandalone() && !supported;
+    const denied = supported && Notification.permission === 'denied';
+
+    $('iosCard').classList.toggle('hide', !iosInstall);
+    $('enableCard').classList.toggle('hide', !(supported && !sub && !denied));
+    $('subscribedCard').classList.toggle('hide', !sub);
+
+    let err = pushError;
+    if (!err && !secure) err = t.insecure;
+    else if (!err && denied) err = t.denied;
+    else if (!err && !supported && !iosInstall) err = t.unsupported;
+    $('errMsg').textContent = err || '';
+    $('errCard').classList.toggle('hide', !err);
+
+    $('diag').textContent = [
+      `secure context (https): ${secure ? 'yes' : 'NO  <- push is blocked'}`,
+      `service worker: ${'serviceWorker' in navigator ? 'yes' : 'no'}`,
+      `push manager: ${'PushManager' in window ? 'yes' : 'no'}`,
+      `permission: ${'Notification' in window ? Notification.permission : 'n/a'}`,
+      `installed to home screen: ${isStandalone() ? 'yes' : 'no'}`,
+      `push service: ${diag.endpoint || '-'}`,
+      `last error: ${diag.error || '-'}`,
+      `orders followed: ${tokens.length}`,
+      `page: ${location.origin}`,
+    ].join('\n');
+  }
+  $('lang').onclick = () => { lang = lang === 'en' ? 'ar' : 'en'; LS.set('pager-lang', lang); render(); };
+
+  // ---------------------------------------------------------------- sound + vibration
+  let audioCtx = null;
+  function unlockAudio() {
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch {}
+  }
+  function beep() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    [0, 0.35, 0.7].forEach((d) => {
+      const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, now + d); g.gain.exponentialRampToValueAtTime(0.4, now + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, now + d + 0.28);
+      o.connect(g).connect(audioCtx.destination); o.start(now + d); o.stop(now + d + 0.3);
+    });
+  }
+  document.addEventListener('pointerdown', unlockAudio, { once: true });
+
+  // ---------------------------------------------------------------- orders
+  function saveTokens() { LS.set('pager-tokens', tokens); }
+  function addToken(tk) { if (!tokens.includes(tk)) { tokens.unshift(tk); saveTokens(); } }
+
+  async function link(body) {
+    const r = await fetch('/api/link', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, subscription: sub }) });
+    return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+  }
+  // Re-attach this phone's subscription to every order it follows (called after enabling alerts / new order).
+  async function linkAll() { if (!sub) return; for (const tk of [...tokens]) { try { await link({ token: tk }); } catch {} } }
+
+  async function refreshAll() {
+    for (const tk of [...tokens]) {
+      try {
+        const r = await fetch(`/api/track/${tk}`, { cache: 'no-store' });
+        if (r.status === 404) { tokens = tokens.filter((x) => x !== tk); delete orders[tk]; continue; }
+        const d = await r.json();
+        if (d.status === 'collected') { tokens = tokens.filter((x) => x !== tk); delete orders[tk]; continue; }
+        orders[tk] = d;
+        if (d.status === 'ready' && !alerted.has(tk)) {
+          alerted.add(tk);
+          if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 700]);
+          beep();
+        }
+      } catch { /* offline: next tick */ }
+    }
+    saveTokens();
+    render();
+  }
+
+  $('addForm').onsubmit = async (e) => {
+    e.preventDefault();
+    unlockAudio();
+    const v = $('numIn').value.trim();
+    if (!v) return;
+    const t = T[lang];
+    try {
+      const r = await link({ orderNumber: v });
+      if (r.ok) { addToken(r.data.token); $('numIn').value = ''; addMsg = ''; }
+      else addMsg = r.status === 410 ? t.gone : r.status === 404 ? t.notFound : t.failed;
+    } catch { addMsg = t.failed; }
+    await refreshAll();
+  };
+
+  // ---------------------------------------------------------------- web push (one-time per phone)
+  const b64ToUint8 = (b64) => {
+    const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  };
+
+  async function subscribe() {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const { key } = await (await fetch('/api/vapid-public-key')).json();
+    const want = b64ToUint8(key);
+    let s = await reg.pushManager.getSubscription();
+    // A subscription made with different server keys can never receive our pushes: replace it.
+    if (s && s.options && s.options.applicationServerKey) {
+      const have = new Uint8Array(s.options.applicationServerKey);
+      if (have.length !== want.length || have.some((b, i) => b !== want[i])) { await s.unsubscribe(); s = null; }
+    }
+    if (!s) s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: want });
+    sub = s.toJSON();
+    diag.endpoint = new URL(s.endpoint).host;
+    pushError = null;
+    await linkAll();
+  }
+
+  $('enableBtn').onclick = async () => {
+    unlockAudio();
+    $('enableBtn').disabled = true;
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') await subscribe();
+    } catch (e) {
+      console.error(e);
+      diag.error = `${e.name}: ${e.message}`;
+      pushError = `${T[lang].failed} (${e.name}: ${e.message})`;
+    } finally { $('enableBtn').disabled = false; render(); }
+  };
+
+  $('testBtn').onclick = async () => {
+    const t = T[lang], out = $('testResult');
+    $('testBtn').disabled = true; out.textContent = '…'; out.className = '';
+    try {
+      const r = await fetch('/api/test-push', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subscription: sub }) });
+      const d = await r.json();
+      if (r.ok && d.sent) { out.textContent = t.testOk; out.className = 'ok-line'; }
+      else { out.textContent = `${t.testFail} ${d.status || ''} ${d.message || d.error || ''}`; out.className = 'warn'; }
+    } catch (e) { out.textContent = String(e); out.className = 'warn'; }
+    setTimeout(() => { $('testBtn').disabled = false; }, 4000);
+  };
+
+  // ---------------------------------------------------------------- start
+  // An order from the QR link (/p/<token>) or from the installed app's first launch (/app?t=<token>)
+  const urlToken = (() => {
+    const m = location.pathname.match(/^\/p\/([^/]+)/);
+    return m ? m[1] : new URLSearchParams(location.search).get('t');
+  })();
+  if (urlToken) addToken(urlToken);
+  if (location.pathname !== '/app' || location.search) history.replaceState(null, '', '/app');
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.type === 'ready') refreshAll(); });
+    // Alerts already allowed on this phone earlier: attach silently, no taps needed for new orders.
+    if (window.isSecureContext && 'Notification' in window && Notification.permission === 'granted') {
+      subscribe().then(() => { render(); refreshAll(); }).catch((e) => { diag.error = `${e.name}: ${e.message}`; render(); });
+    }
+  }
+  setInterval(refreshAll, 3000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAll(); });
+  render();
+  refreshAll();
+})();
+</script>
+</body>
+</html>

@@ -61,6 +61,8 @@ function loadVapid() {
   return keys;
 }
 const vapid = loadVapid();
+// Use a REAL contact (mailto:you@yourdomain.com or https://yoursite.com). Some push services (Apple's) reject placeholder subjects.
+if (!process.env.VAPID_SUBJECT) console.warn('[warn] VAPID_SUBJECT not set. Start with VAPID_SUBJECT=mailto:your-real-email@gmail.com');
 webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@example.com', vapid.publicKey, vapid.privateKey);
 
 // ---------------------------------------------------------------- tiny JSON store
@@ -119,10 +121,13 @@ async function pushToOrder(order, payload) {
   const body = JSON.stringify(payload);
   const results = [];
   for (const sub of [...order.subscriptions]) {
+    const service = (() => { try { return new URL(sub.endpoint).host; } catch { return '?'; } })();
     try {
-      await webpush.sendNotification(sub, body, { TTL: 3600, urgency: 'high' });
+      const r = await webpush.sendNotification(sub, body, { TTL: 3600, urgency: 'high' });
+      console.log(`[push] order #${order.orderNumber} -> ${service}: accepted (HTTP ${r.statusCode})`);
       results.push({ ok: true });
     } catch (err) {
+      console.error(`[push] order #${order.orderNumber} -> ${service}: FAILED ${err.statusCode || ''} ${err.body || err.message}`);
       results.push({ ok: false, status: err.statusCode, message: err.body || err.message });
       // 404/410 = subscription expired or user revoked permission -> forget it
       if (err.statusCode === 404 || err.statusCode === 410) {
@@ -142,24 +147,29 @@ app.use(express.json({ limit: '50kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- customer-facing (no auth, protected by the unguessable token)
-app.get('/p/:token', (req, res) => res.sendFile(path.join(__dirname, 'public', 'pager.html')));
+// One customer page for everything: /app (installed app, type an order number) and /p/<token> (QR link).
+const customerPage = (req, res) => res.sendFile(path.join(__dirname, 'public', 'app.html'));
+app.get('/app', customerPage);
+app.get('/p/:token', customerPage);
 
-// Per-order manifest so "Add to Home Screen" (needed for push on iPhone) reopens the same order.
-app.get('/p/:token/manifest.webmanifest', (req, res) => {
-  res.type('application/manifest+json').json({
-    name: 'Order Pager',
-    short_name: 'Pager',
-    start_url: `/p/${req.params.token}`,
-    scope: '/',
-    display: 'standalone',
-    background_color: '#0f172a',
-    theme_color: '#0f172a',
-    icons: [
-      { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-    ],
-  });
+// Manifest for "Add to Home Screen". The per-order version makes the first launch of the installed app
+// pick up the order the customer was looking at when they installed it.
+const manifest = (startUrl) => ({
+  name: 'Order Pager',
+  short_name: 'Pager',
+  start_url: startUrl,
+  scope: '/',
+  display: 'standalone',
+  background_color: '#0f172a',
+  theme_color: '#0f172a',
+  icons: [
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+  ],
 });
+app.get('/manifest.webmanifest', (req, res) => res.type('application/manifest+json').json(manifest('/app')));
+app.get('/p/:token/manifest.webmanifest', (req, res) =>
+  res.type('application/manifest+json').json(manifest(`/app?t=${encodeURIComponent(req.params.token)}`)));
 
 app.get('/api/vapid-public-key',(req, res) => res.json({ key: vapid.publicKey }));
 
@@ -180,7 +190,43 @@ app.post('/api/track/:token/subscribe', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/track/:token/unsubscribe', (req, res) => {
+// Attach a phone to an order, by QR token OR by typing the order number. The phone's push subscription
+// (optional here) is stored on the order, so enabling alerts is a ONE-TIME step per phone: every later
+// order just needs its number.
+app.post('/api/link', (req, res) => {
+  const { token, orderNumber, subscription } = req.body || {};
+  const o = token
+    ? db.orders.find((x) => x.token === token)
+    : db.orders.find((x) => x.orderNumber === String(orderNumber || '').trim() && x.status !== 'collected');
+  if (!o) return res.status(404).json({ error: 'not_found' });
+  if (o.status === 'collected') return res.status(410).json({ error: 'collected' });
+  if (subscription && subscription.endpoint && subscription.keys) {
+    o.subscriptions = o.subscriptions.filter((s) => s.endpoint !== subscription.endpoint);
+    o.subscriptions.push(subscription);
+    save();
+  }
+  res.json({ token: o.token, orderNumber: o.orderNumber, status: o.status });
+});
+
+// "Send me a test notification" on the customer page: pushes straight to this phone, no order needed.
+const lastTest = new Map();
+app.post('/api/test-push', async (req, res) => {
+  const sub = req.body && req.body.subscription;
+  if (!sub || !sub.endpoint || !sub.keys) return res.status(400).json({ error: 'bad_subscription' });
+  const now = Date.now();
+  if (now - (lastTest.get(sub.endpoint) || 0) < 4000) return res.status(429).json({ error: 'too_fast' });
+  lastTest.set(sub.endpoint, now);
+  try {
+    await webpush.sendNotification(sub, JSON.stringify({ title: 'Test notification', body: 'Notifications work on this phone.', orderNumber: 'test', url: '/app' }), { TTL: 60, urgency: 'high' });
+    console.log('[push] test -> accepted');
+    res.json({ sent: 1 });
+  } catch (err) {
+    console.error(`[push] test FAILED ${err.statusCode || ''} ${err.body || err.message}`);
+    res.status(502).json({ sent: 0, status: err.statusCode, message: String(err.body || err.message).slice(0, 200) });
+  }
+});
+
+app.post('/api/track/:token/unsubscribe',(req, res) => {
   const o = db.orders.find((x) => x.token === req.params.token);
   if (!o) return res.status(404).json({ error: 'not_found' });
   const endpoint = req.body && req.body.endpoint;
@@ -239,7 +285,7 @@ api.post('/orders/:ref/ready', async (req, res) => {
     title: `Order #${o.orderNumber} is ready`,
     body: 'Your order is ready for pickup.',
     orderNumber: o.orderNumber,
-    url: `/p/${o.token}`,
+    url: `/app?t=${o.token}`,
   });
   res.json({ ...publicOrder(o), push });
 });
@@ -253,7 +299,7 @@ api.post('/orders/:ref/renotify', async (req, res) => {
     title: `Order #${o.orderNumber} is ready`,
     body: 'Reminder: your order is waiting for you.',
     orderNumber: o.orderNumber,
-    url: `/p/${o.token}`,
+    url: `/app?t=${o.token}`,
   });
   res.json({ ...publicOrder(o), push });
 });

@@ -31,11 +31,12 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || '/';
+  const url = (event.notification.data && event.notification.data.url) || '/app';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      // Reuse the pager window that is already open (the installed app on iPhone), else open one.
       for (const c of list) {
-        if (c.url.includes(url) && 'focus' in c) return c.focus();
+        if ('focus' in c) return c.focus();
       }
       return self.clients.openWindow(url);
     })

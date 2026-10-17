@@ -26,8 +26,20 @@ VAPID keys are generated on first start and stored in `data/vapid.json`. Do not 
 ## Test it (dashboard)
 
 1. Open `http://localhost:3000`, type an order number, press **Add order**. A QR / link dialog appears.
-2. Press **Open as customer** (or scan the QR on a phone). Tap **Enable alerts** and allow notifications.
+2. Press **Open as customer** (or scan the QR on a phone). Tap **Enable alerts** and allow notifications. This is a **one-time step per phone**.
 3. Back on the dashboard press **Ready + Push**. The notification arrives, the customer page turns green, vibrates and beeps.
+4. Add a second order. On the same phone just open the app/page and type the new order number in "Track an order". No install and no permission prompt again.
+
+## Customer experience (setup happens once per phone)
+
+| Phone | First order | Every next order |
+| --- | --- | --- |
+| Android (Chrome) | Scan QR, tap Enable alerts, allow | Scan QR: linked automatically, zero taps. Or type the number |
+| iPhone | Scan QR, Share > Add to Home Screen, open the app, Enable alerts | Open the Pager app, type the order number |
+
+Why iPhone needs the Home Screen step: Apple only allows web push for sites installed to the Home Screen, and a QR scan always opens Safari, which has separate storage from the installed app. So on iPhone the installed app is where new orders are typed in. This is an iOS rule that applies to every web-push pager.
+
+If you need **zero install and zero permission on iPhone**, web push cannot do it. The alternative is sending the "ready" message by SMS or WhatsApp to the customer's phone number (needs the number at ordering and a paid provider such as Twilio or the WhatsApp Business API).
 
 ## Test on your phone (laptop on your Wi-Fi, e.g. 192.168.1.72)
 
@@ -56,9 +68,20 @@ cloudflared tunnel --url http://localhost:3000     # or: ngrok http 3000
 PUBLIC_URL=https://<the-url-it-prints> npm start
 ```
 
-**Option C (Android Chrome only, quick hack):** on the phone open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add `http://192.168.1.72:3000`, enable it, relaunch Chrome.
+**Option C (Android Chrome only, unreliable):** the `chrome://flags/#unsafely-treat-insecure-origin-as-secure` flag with `http://192.168.1.72:3000` sometimes lets the page register, but the phone often still fails to subscribe to push. Prefer A or B.
 
 If the phone cannot even open the page, allow the port in the laptop firewall (Windows: Defender Firewall > allow Node.js on Private networks, or `netsh advfirewall firewall add rule name=pager dir=in action=allow protocol=TCP localport=3000`).
+
+### Notification does not arrive? Check in this order
+
+1. Start the server with a real contact: `VAPID_SUBJECT=mailto:you@gmail.com npm start` (placeholder addresses can be rejected by Apple).
+2. On the phone open the customer page, tap **Enable alerts**, allow, then tap **Send me a test notification**. If this shows a number and message, that is the exact reason the push service gave. Also open **Diagnostics** at the bottom: `secure context` must be `yes` and `permission` must be `granted`.
+3. Watch the server console: every push logs `accepted` or `FAILED <status> <reason>`.
+   - `accepted` but nothing on the phone: check the phone's notification settings for the browser (Android: Chrome notifications on, battery saver off; iPhone: the Home Screen app must have notifications allowed and Focus mode off).
+   - `FAILED 403/401`: wrong or placeholder VAPID subject, or the page was subscribed before `data/vapid.json` changed. Reload the customer page and enable alerts again.
+   - `FAILED 404/410`: the phone's subscription expired. Re-open the page and enable alerts.
+   - Network error (`ENOTFOUND`, `ETIMEDOUT`): the laptop has no internet or a proxy blocks `fcm.googleapis.com` / `web.push.apple.com`.
+4. Dashboard shows `no device subscribed` for the order: the phone never completed Enable alerts (see step 2).
 
 Push messages are delivered through Google/Apple/Mozilla push servers, so the **laptop also needs internet access** when you press Ready + Push.
 
@@ -93,7 +116,7 @@ curl -X POST http://localhost:3000/api/orders/42/ready -H "x-api-key: dev-key"
 ```
 server.js            Express API, VAPID keys, JSON storage, push sending
 public/index.html    Test dashboard (add order, QR, Ready + Push)
-public/pager.html    Customer page at /p/<token> (AR/EN, enable alerts, ready screen)
+public/app.html      Customer page at /app and /p/<token> (AR/EN, one-time enable alerts, track orders by number)
 public/sw.js         Service worker that shows the notification
 data/                db.json + vapid.json (created at runtime)
 ```
