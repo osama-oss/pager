@@ -1,0 +1,15 @@
+node_modules/
+data/
+certs/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.idea/
+.vscode/
+dist/
+build/
+.expo/
+apps/
+packages/

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pager">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon-192.png">
+<title>Order Pager</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+    transition: background .4s;
+  }
+  body.ready { background: var(--ok); color: #052e16; animation: flash 1.1s ease-in-out infinite; }
+  @keyframes flash { 50% { background: #4ade80; } }
+  .lang { position: fixed; top: 14px; inset-inline-end: 14px; background: transparent; color: inherit; border: 1px solid currentColor; border-radius: 999px; padding: 6px 14px; font-size: 14px; opacity: .8; cursor: pointer; }
+  main { width: 100%; max-width: 420px; text-align: center; }
+  .label { color: var(--muted); font-size: 15px; letter-spacing: .04em; text-transform: uppercase; }
+  body.ready .label { color: #14532d; }
+  .number { font-size: clamp(88px, 34vw, 168px); font-weight: 800; line-height: 1; margin: 6px 0 14px; font-variant-numeric: tabular-nums; word-break: break-all; }
+  .status { display: inline-block; padding: 8px 18px; border-radius: 999px; font-weight: 600; background: var(--card); color: var(--accent); }
+  body.ready .status { background: #052e16; color: #bbf7d0; font-size: 22px; padding: 12px 26px; }
+  .card { background: var(--card); border-radius: 16px; padding: 18px; margin-top: 26px; text-align: start; }
+  .card p { margin: 0 0 12px; color: var(--muted); line-height: 1.5; }
+  .card p:last-child { margin-bottom: 0; }
+  button.primary { width: 100%; border: 0; border-radius: 12px; padding: 16px; font-size: 18px; font-weight: 700; background: var(--accent); color: #082f49; cursor: pointer; }
+  button.primary:disabled { opacity: .5; }
+  .ok-line { color: var(--ok); font-weight: 600; }
+  .warn { color: var(--warn); }
+  .hide { display: none !important; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--ok); margin-inline-end:8px; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .big { font-size: 28px; font-weight: 800; margin-top: 18px; }
+</style>
+</head>
+<body>
+<button class="lang" id="lang" type="button">العربية</button>
+
+<main>
+  <div class="label" id="tOrder">Your order</div>
+  <div class="number" id="num">–</div>
+  <div class="status" id="status">…</div>
+  <div class="big hide" id="readyText"></div>
+
+  <div class="card hide" id="enableCard">
+    <p id="tEnableHelp"></p>
+    <button class="primary" id="enableBtn" type="button"></button>
+  </div>
+
+  <div class="card hide" id="iosCard">
+    <p class="warn" id="tIos"></p>
+  </div>
+
+  <div class="card hide" id="subscribedCard">
+    <p class="ok-line"><span class="dot"></span><span id="tSubscribed"></span></p>
+    <p id="tKeepOpen"></p>
+  </div>
+
+  <div class="card hide" id="errCard"><p class="warn" id="errMsg"></p></div>
+</main>
+
+<script>
+(() => {
+  const token = location.pathname.split('/').filter(Boolean).pop();
+  const $ = (id) => document.getElementById(id);
+
+  // ---- per-order manifest (so "Add to Home Screen" reopens this order)
+  const link = document.createElement('link');
+  link.rel = 'manifest'; link.href = `/p/${token}/manifest.webmanifest`;
+  document.head.appendChild(link);
+
+  // ---- i18n
+  const T = {
+    en: {
+      dir: 'ltr', other: 'العربية', order: 'Your order',
+      waiting: 'Preparing your order…', ready: 'READY', readyText: 'Please come to the counter',
+      collected: 'Collected. Thank you!', notFound: 'Order not found. Please ask the cashier.',
+      enableHelp: 'Turn on alerts and we will notify your phone the moment your order is ready. You can lock your screen.',
+      enable: 'Enable alerts', subscribed: 'Alerts are on', keepOpen: 'We will notify you here and on your lock screen.',
+      denied: 'Notifications are blocked. Allow them in your browser settings, or keep this page open.',
+      unsupported: 'This browser cannot receive alerts. Keep this page open — it updates automatically.',
+      ios: 'On iPhone: tap Share, then “Add to Home Screen”, open the app from your home screen and enable alerts.',
+      failed: 'Could not enable alerts. Please try again.',
+    },
+    ar: {
+      dir: 'rtl', other: 'English', order: 'طلبك',
+      waiting: 'جاري تجهيز طلبك…', ready: 'جاهز', readyText: 'تفضّل بالاستلام من الكاونتر',
+      collected: 'تم الاستلام. شكراً لك!', notFound: 'لم يتم العثور على الطلب. اسأل الكاشير.',
+      enableHelp: 'فعّل التنبيهات وسنرسل لجوالك تنبيهاً فور جهوزية طلبك. يمكنك قفل الشاشة.',
+      enable: 'تفعيل التنبيهات', subscribed: 'التنبيهات مفعّلة', keepOpen: 'سنرسل لك تنبيهاً هنا وعلى شاشة القفل.',
+      denied: 'الإشعارات محظورة. اسمح بها من إعدادات المتصفح، أو أبقِ هذه الصفحة مفتوحة.',
+      unsupported: 'هذا المتصفح لا يدعم التنبيهات. أبقِ هذه الصفحة مفتوحة — تتحدث تلقائياً.',
+      ios: 'على الآيفون: اضغط مشاركة ثم «إضافة إلى الشاشة الرئيسية»، افتح التطبيق من الشاشة الرئيسية ثم فعّل التنبيهات.',
+      failed: 'تعذر تفعيل التنبيهات. حاول مرة أخرى.',
+    },
+  };
+  let lang = localStorage.getItem('pager-lang') || ((navigator.language || '').startsWith('ar') ? 'ar' : 'en');
+  let state = { status: null, orderNumber: null, subscribed: false, error: null, notFound: false };
+
+  function render() {
+    const t = T[lang];
+    document.documentElement.lang = lang;
+    document.documentElement.dir = t.dir;
+    $('lang').textContent = t.other;
+    $('tOrder').textContent = t.order;
+    $('tEnableHelp').textContent = t.enableHelp;
+    $('enableBtn').textContent = t.enable;
+    $('tSubscribed').textContent = t.subscribed;
+    $('tKeepOpen').textContent = t.keepOpen;
+    $('tIos').textContent = t.ios;
+    $('readyText').textContent = t.readyText;
+
+    const isReady = state.status === 'ready';
+    document.body.classList.toggle('ready', isReady);
+    $('num').textContent = state.orderNumber ? '#' + state.orderNumber : '–';
+    $('status').textContent = state.notFound ? t.notFound
+      : isReady ? t.ready
+      : state.status === 'collected' ? t.collected
+      : t.waiting;
+    $('readyText').classList.toggle('hide', !isReady);
+
+    const waiting = state.status === 'waiting';
+    const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    const iosNeedsInstall = isIOS() && !isStandalone() && !supported;
+
+    $('enableCard').classList.toggle('hide', !(waiting && supported && !state.subscribed && Notification.permission !== 'denied'));
+    $('subscribedCard').classList.toggle('hide', !(waiting && state.subscribed));
+    $('iosCard').classList.toggle('hide', !(waiting && iosNeedsInstall));
+
+    let err = state.error;
+    if (!err && waiting && supported && Notification.permission === 'denied') err = t.denied;
+    if (!err && waiting && !supported && !iosNeedsInstall) err = t.unsupported;
+    $('errMsg').textContent = err || '';
+    $('errCard').classList.toggle('hide', !err);
+  }
+
+  function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function isStandalone() { return window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches; }
+
+  $('lang').onclick = () => { lang = lang === 'en' ? 'ar' : 'en'; localStorage.setItem('pager-lang', lang); render(); };
+
+  // ---- sound + vibration when ready (sound unlocks after the first tap)
+  let audioCtx = null;
+  function unlockAudio() {
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch {}
+  }
+  function beep() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    [0, 0.35, 0.7].forEach((d) => {
+      const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, now + d); g.gain.exponentialRampToValueAtTime(0.4, now + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, now + d + 0.28);
+      o.connect(g).connect(audioCtx.destination); o.start(now + d); o.stop(now + d + 0.3);
+    });
+  }
+  let alerted = false;
+  function onBecameReady() {
+    if (alerted) return; alerted = true;
+    if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 700]);
+    beep();
+  }
+
+  // ---- status polling (works even without push, and updates the open page)
+  async function refresh() {
+    try {
+      const r = await fetch(`/api/track/${token}`, { cache: 'no-store' });
+      if (r.status === 404) { state.notFound = true; render(); return; }
+      const d = await r.json();
+      state.notFound = false;
+      state.orderNumber = d.orderNumber;
+      const was = state.status;
+      state.status = d.status;
+      if (d.status === 'ready' && was !== 'ready') onBecameReady();
+      render();
+    } catch { /* offline: try again next tick */ }
+  }
+  setInterval(refresh, 3000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+
+  // ---- web push
+  function b64ToUint8(b64) {
+    const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  }
+
+  async function subscribe() {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const { key } = await (await fetch('/api/vapid-public-key')).json();
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToUint8(key) });
+    }
+    const r = await fetch(`/api/track/${token}/subscribe`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON() }),
+    });
+    if (!r.ok) throw new Error('subscribe failed');
+    state.subscribed = true; state.error = null;
+  }
+
+  $('enableBtn').onclick = async () => {
+    unlockAudio();
+    $('enableBtn').disabled = true;
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { state.error = null; render(); return; }
+      await subscribe();
+    } catch (e) {
+      console.error(e); state.error = T[lang].failed;
+    } finally { $('enableBtn').disabled = false; render(); }
+  };
+  // any tap anywhere unlocks audio so the "ready" beep can play later
+  document.addEventListener('pointerdown', unlockAudio, { once: true });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'ready') refresh();
+    });
+    // Already allowed earlier? re-attach silently (keeps the subscription fresh).
+    if ('Notification' in window && Notification.permission === 'granted') {
+      subscribe().then(render).catch(() => {});
+    }
+  }
+
+  render();
+  refresh();
+})();
+</script>
+</body>
+</html>

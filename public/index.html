@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pager Test Dashboard</title>
+<style>
+  :root { --bg:#0b1220; --panel:#131c30; --line:#24314d; --text:#e8eefc; --muted:#8a9bbd; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 22px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; }
+  h1 small { color:var(--muted); font-weight:400; margin-inline-start:8px; }
+  .key { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px; }
+  input { background:#0e1627; border:1px solid var(--line); color:var(--text); border-radius:10px; padding:10px 12px; font-size:15px; }
+  input:focus { outline:2px solid var(--accent); outline-offset:0; }
+  button { background:#1b2740; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:9px 14px; font-size:14px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#06283d; font-weight:700; }
+  button.go { background:var(--ok); border-color:var(--ok); color:#052e16; font-weight:700; }
+  button.danger:hover { border-color:var(--bad); color:var(--bad); }
+  main { max-width:960px; margin:0 auto; padding:22px; }
+  .add { display:flex; gap:10px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  .add input { flex:1; font-size:22px; font-weight:700; min-width:0; }
+  .add button { font-size:16px; padding:10px 22px; }
+  .hint { color:var(--muted); font-size:13px; margin:10px 2px 22px; }
+  .list { display:grid; gap:12px; }
+  .order { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; display:grid; grid-template-columns:auto 1fr; gap:6px 18px; align-items:center; }
+  .order.ready { border-color:var(--ok); }
+  .order.collected { opacity:.55; }
+  .no { font-size:38px; font-weight:800; font-variant-numeric:tabular-nums; grid-row:span 2; min-width:84px; }
+  .meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px; color:var(--muted); }
+  .badge { padding:3px 10px; border-radius:999px; font-weight:600; font-size:12px; border:1px solid var(--line); }
+  .b-waiting { color:var(--warn); border-color:var(--warn); }
+  .b-ready { color:var(--ok); border-color:var(--ok); }
+  .b-collected { color:var(--muted); }
+  .dev-on { color:var(--ok); } .dev-off { color:var(--muted); }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .push { font-size:12px; color:var(--muted); grid-column:2; }
+  .push.bad { color:var(--bad); }
+  .empty { text-align:center; color:var(--muted); padding:40px 10px; border:1px dashed var(--line); border-radius:14px; }
+  dialog { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:16px; padding:22px; max-width:340px; text-align:center; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  dialog img { width:240px; height:240px; background:#fff; border-radius:12px; padding:8px; }
+  dialog .url { word-break:break-all; font-size:12px; color:var(--muted); margin:10px 0; }
+  .toast { position:fixed; bottom:20px; inset-inline:0; margin:auto; width:max-content; max-width:90vw; background:#1b2740; border:1px solid var(--line); padding:10px 18px; border-radius:999px; opacity:0; transition:opacity .25s; pointer-events:none; }
+  .toast.show { opacity:1; }
+  @media (max-width:560px){ .order{ grid-template-columns:1fr; } .no{ grid-row:auto; } .push{ grid-column:1; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pager <small>test dashboard</small></h1>
+  <div class="key">API key <input id="key" type="password" size="14" placeholder="dev-key"> <button id="saveKey" type="button">Save</button></div>
+</header>
+
+<main>
+  <form class="add" id="addForm">
+    <input id="orderNumber" inputmode="numeric" autocomplete="off" placeholder="Order number (e.g. 42)" maxlength="20" autofocus>
+    <button class="primary" type="submit">Add order</button>
+  </form>
+  <p class="hint">
+    1) Add an order &nbsp;→&nbsp; 2) press <b>QR / Link</b> and open it on the phone (or a second browser tab) and tap <b>Enable alerts</b>
+    &nbsp;→&nbsp; 3) press <b>Ready + Push</b>.
+  </p>
+
+  <div class="list" id="list"></div>
+</main>
+
+<dialog id="qrDlg">
+  <h3 id="qrTitle" style="margin-top:0"></h3>
+  <img id="qrImg" alt="QR code">
+  <div class="url" id="qrUrl"></div>
+  <div class="actions" style="justify-content:center">
+    <button id="qrCopy" type="button">Copy link</button>
+    <button id="qrOpen" type="button" class="primary">Open as customer</button>
+    <button id="qrClose" type="button">Close</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  let key = localStorage.getItem('pager-key') || 'dev-key';
+  $('key').value = key === 'dev-key' ? '' : key;
+  $('saveKey').onclick = () => { key = $('key').value.trim() || 'dev-key'; localStorage.setItem('pager-key', key); toast('API key saved'); load(); };
+
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2400); }
+
+  async function api(path, opts = {}) {
+    const r = await fetch('/api' + path, { ...opts, headers: { 'x-api-key': key, 'content-type': 'application/json', ...(opts.headers || {}) } });
+    if (r.status === 401) { toast('Wrong API key'); throw new Error('unauthorized'); }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+
+  const ago = (ts) => { const s = Math.max(0, Math.round((Date.now() - ts) / 1000)); return s < 60 ? s + 's ago' : Math.round(s / 60) + 'm ago'; };
+  const orderUrl = (o) => `${location.origin}/p/${o.token}`;
+  let orders = [];
+
+  function render() {
+    const list = $('list');
+    if (!orders.length) { list.innerHTML = '<div class="empty">No orders yet. Add one above.</div>'; return; }
+    list.innerHTML = orders.map((o) => {
+      let push = '';
+      if (o.lastPush) {
+        const bad = o.lastPush.failed > 0 || o.lastPush.sent === 0;
+        const why = o.lastPush.details && o.lastPush.details[0] ? ` (${esc(o.lastPush.details[0].status || '')} ${esc(String(o.lastPush.details[0].message || '').slice(0, 80))})` : '';
+        push = `<div class="push ${bad ? 'bad' : ''}">Last push ${ago(o.lastPush.at)}: ${o.lastPush.sent} delivered to push service, ${o.lastPush.failed} failed${bad ? why : ''}${o.lastPush.sent === 0 && !o.lastPush.failed ? ' — no device has enabled alerts yet' : ''}</div>`;
+      }
+      const active = o.status !== 'collected';
+      return `
+      <div class="order ${o.status}" data-id="${o.id}">
+        <div class="no">#${esc(o.orderNumber)}</div>
+        <div class="meta">
+          <span class="badge b-${o.status}">${o.status}</span>
+          <span class="${o.devices ? 'dev-on' : 'dev-off'}">${o.devices ? '● ' + o.devices + ' device' + (o.devices > 1 ? 's' : '') + ' subscribed' : '○ no device subscribed'}</span>
+          <span>created ${ago(o.createdAt)}</span>
+        </div>
+        <div class="actions">
+          ${active ? `<button class="go" data-a="ready">${o.status === 'ready' ? 'Push again' : 'Ready + Push'}</button>` : ''}
+          ${active ? `<button data-a="qr">QR / Link</button>` : ''}
+          ${o.status === 'ready' ? `<button data-a="collected">Collected</button>` : ''}
+          <button class="danger" data-a="delete">Delete</button>
+        </div>
+        ${push}
+      </div>`;
+    }).join('');
+  }
+
+  async function load() {
+    try { orders = (await api('/orders')).orders; render(); } catch {}
+  }
+
+  $('addForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const v = $('orderNumber').value.trim();
+    if (!v) return;
+    try {
+      const o = await api('/orders', { method: 'POST', body: JSON.stringify({ orderNumber: v }) });
+      $('orderNumber').value = '';
+      await load();
+      showQr(o);
+    } catch {}
+  };
+
+  $('list').onclick = async (e) => {
+    const btn = e.target.closest('button[data-a]');
+    if (!btn) return;
+    const id = btn.closest('.order').dataset.id;
+    const o = orders.find((x) => x.id === id);
+    try {
+      if (btn.dataset.a === 'qr') showQr(o);
+      if (btn.dataset.a === 'ready') {
+        btn.disabled = true;
+        const r = await api(`/orders/${id}/ready`, { method: 'POST' });
+        toast(r.push.sent ? `Push sent for #${o.orderNumber}` : `#${o.orderNumber} marked ready — no push delivered`);
+        await load();
+      }
+      if (btn.dataset.a === 'collected') { await api(`/orders/${id}/collected`, { method: 'POST' }); await load(); }
+      if (btn.dataset.a === 'delete') { await api(`/orders/${id}`, { method: 'DELETE' }); await load(); }
+    } catch (err) { toast('Error: ' + err.message); }
+  };
+
+  // ---- QR dialog
+  let current = null;
+  function showQr(o) {
+    current = o;
+    $('qrTitle').textContent = 'Order #' + o.orderNumber;
+    $('qrImg').src = `/api/orders/${o.id}/qr.svg?key=${encodeURIComponent(key)}&t=${Date.now()}`;
+    $('qrUrl').textContent = o.url || orderUrl(o);
+    $('qrDlg').showModal();
+  }
+  $('qrClose').onclick = () => $('qrDlg').close();
+  $('qrOpen').onclick = () => window.open(orderUrl(current), '_blank');
+  // Copy the phone-reachable (LAN) link from the server, not the laptop's own localhost address.
+  $('qrCopy').onclick = async () => { const u = current.url || orderUrl(current); try { await navigator.clipboard.writeText(u); toast('Link copied'); } catch { toast(u); } };
+
+  load();
+  setInterval(load, 2500);
+})();
+</script>
+</body>
+</html>
